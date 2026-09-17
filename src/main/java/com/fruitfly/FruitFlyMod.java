@@ -1,10 +1,13 @@
 package com.fruitfly;
 
+import com.fruitfly.entity.BrainZombieEntity;
 import com.fruitfly.entity.FlyEntity;
 import com.fruitfly.net.BrainTelemetryPayload;
 import com.fruitfly.server.BrainCommands;
 import com.fruitfly.server.FruitFlyCommands;
 import net.fabricmc.api.ModInitializer;
+import net.fabricmc.fabric.api.biome.v1.BiomeModifications;
+import net.fabricmc.fabric.api.biome.v1.BiomeSelectors;
 import net.fabricmc.fabric.api.command.v2.CommandRegistrationCallback;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerEntityEvents;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerLifecycleEvents;
@@ -28,7 +31,6 @@ import java.nio.file.Path;
 public final class FruitFlyMod implements ModInitializer {
     public static final String MOD_ID = "fruitfly";
     public static final Logger LOGGER = LoggerFactory.getLogger(MOD_ID);
-
     public static final Path CONFIG_PATH = FabricLoader.getInstance().getConfigDir().resolve("fruitfly.json");
     public static final FruitFlyConfig CONFIG = FruitFlyConfig.load(CONFIG_PATH);
     public static final FlyBrainService BRAIN = new FlyBrainService(CONFIG);
@@ -38,29 +40,32 @@ public final class FruitFlyMod implements ModInitializer {
     public static final EntityType<FlyEntity> FRUIT_FLY = Registry.register(
             BuiltInRegistries.ENTITY_TYPE, id("fruit_fly"),
             EntityType.Builder.of(FlyEntity::new, MobCategory.CREATURE)
-                    .sized(0.5f, 0.3f)
-                    .eyeHeight(0.2f)
-                    .clientTrackingRange(10)
-                    .updateInterval(1)
-                    .build());
+                    .sized(0.5f, 0.3f).eyeHeight(0.2f).clientTrackingRange(10).updateInterval(1).build());
 
-    public static final Item FRUIT_FLY_SPAWN_EGG = Registry.register(
-            BuiltInRegistries.ITEM, id("fruit_fly_spawn_egg"),
-            new SpawnEggItem(FRUIT_FLY, 0xC8A165, 0xB22222, new Item.Properties()));
+    /** A full-sized hostile zombie whose decisions are driven by the same connectome. */
+    public static final EntityType<BrainZombieEntity> BRAIN_ZOMBIE = Registry.register(
+            BuiltInRegistries.ENTITY_TYPE, id("brain_zombie"),
+            EntityType.Builder.of(BrainZombieEntity::new, MobCategory.MONSTER)
+                    .sized(0.6f, 1.95f).eyeHeight(1.74f).clientTrackingRange(10).updateInterval(1).build());
+
+    public static final Item FRUIT_FLY_SPAWN_EGG = Registry.register(BuiltInRegistries.ITEM,
+            id("fruit_fly_spawn_egg"), new SpawnEggItem(FRUIT_FLY, 0xC8A165, 0xB22222, new Item.Properties()));
+    public static final Item BRAIN_ZOMBIE_SPAWN_EGG = Registry.register(BuiltInRegistries.ITEM,
+            id("brain_zombie_spawn_egg"), new SpawnEggItem(BRAIN_ZOMBIE, 0x3D5C3A, 0x7A1F1F, new Item.Properties()));
 
     @Override
     public void onInitialize() {
         LOGGER.info("Fruit Fly Connectome initialising (config {})", CONFIG_PATH);
         FabricDefaultAttributeRegistry.register(FRUIT_FLY, FlyEntity.createAttributes());
-        if (CONFIG.spawnEggInCreativeTab) {
-            ItemGroupEvents.modifyEntriesEvent(CreativeModeTabs.SPAWN_EGGS).register(entries -> entries.accept(FRUIT_FLY_SPAWN_EGG));
-        }
+        FabricDefaultAttributeRegistry.register(BRAIN_ZOMBIE, BrainZombieEntity.createAttributes());
+        // Vanilla zombies commonly use weight 100; weight 25 gives this type one quarter of that selection weight.
+        BiomeModifications.addSpawn(BiomeSelectors.foundInOverworld(), MobCategory.MONSTER, BRAIN_ZOMBIE, 25, 1, 1);
+        if (CONFIG.spawnEggInCreativeTab) ItemGroupEvents.modifyEntriesEvent(CreativeModeTabs.SPAWN_EGGS)
+                .register(entries -> { entries.accept(FRUIT_FLY_SPAWN_EGG); entries.accept(BRAIN_ZOMBIE_SPAWN_EGG); });
         PayloadTypeRegistry.playS2C().register(BrainTelemetryPayload.TYPE, BrainTelemetryPayload.CODEC);
         CommandRegistrationCallback.EVENT.register((dispatcher, registryAccess, environment) -> {
-            FruitFlyCommands.register(dispatcher);
-            BrainCommands.register(dispatcher);
+            FruitFlyCommands.register(dispatcher); BrainCommands.register(dispatcher);
         });
-
         ServerLifecycleEvents.SERVER_STARTING.register(server -> BRAIN.preload());
         ServerLifecycleEvents.SERVER_STOPPING.register(server -> BRAIN.shutdown());
         ServerEntityEvents.ENTITY_UNLOAD.register((entity, level) -> {
